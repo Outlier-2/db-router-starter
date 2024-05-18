@@ -1,6 +1,8 @@
 package cn.l13z.middleware.db.router;
 
 import cn.l13z.middleware.db.router.annotation.DBRouter;
+import cn.l13z.middleware.db.router.annotation.DBRouterStrategy;
+import cn.l13z.middleware.db.router.strategy.IDBRouterStrategy;
 import java.lang.reflect.Method;
 import org.apache.commons.beanutils.BeanUtils;
 import org.apache.commons.lang.StringUtils;
@@ -28,8 +30,15 @@ public class DBRouterJoinPoint {
 
     private final Logger logger = LoggerFactory.getLogger("DBRouterJoinPoint");
 
-    //    @Autowired
-    private DBRouterConfig dbRouterConfig;
+    private final DBRouterConfig dbRouterConfig;
+
+    private final IDBRouterStrategy dbRouterStrategy;
+
+    public DBRouterJoinPoint(DBRouterConfig dbRouterConfig, IDBRouterStrategy dbRouterStrategy) {
+        this.dbRouterConfig = dbRouterConfig;
+        this.dbRouterStrategy = dbRouterStrategy;
+
+    }
 
     @Pointcut("@annotation(cn.l13z.middleware.db.router.annotation.DBRouter)")
     public void aopPoint() {
@@ -45,28 +54,16 @@ public class DBRouterJoinPoint {
 
         dbKey = StringUtils.isNotBlank(dbKey) ? dbKey : dbRouterConfig.getRouterKey();
 
-        // 计算路由
+        // 路由属性
         String dbKeyAttr = getAttrValue(dbKey, jp.getArgs());
-        int size = dbRouterConfig.getDbCount() * dbRouterConfig.getTbCount();
-
-        // 扰动函数
-        int idx = (size - 1) & (dbKeyAttr.hashCode() ^ (dbKeyAttr.hashCode() >>> 16));
-
-        // 库表索引
-        int dbIdx = idx / dbRouterConfig.getTbCount() + 1;
-        int tbIdx = idx - dbRouterConfig.getTbCount() * (dbIdx - 1);
-
-        // 设置到 ThreadLocal
-        DBContextHolder.setDbKey(String.format("%02d", dbIdx));
-        DBContextHolder.setTbKey(String.format("%03d", tbIdx));
-        logger.info("数据库路由 method：{} dbIdx：{} tbIdx：{}", getMethod(jp).getName(), dbIdx, tbIdx);
-
+        //路由策略
+        dbRouterStrategy.doRouter(dbKeyAttr);
+        //返回结果
         // 返回结果
         try {
             return jp.proceed();
         } finally {
-            DBContextHolder.clearDbKey();
-            DBContextHolder.clearTbKey();
+            dbRouterStrategy.clear();
         }
     }
 
