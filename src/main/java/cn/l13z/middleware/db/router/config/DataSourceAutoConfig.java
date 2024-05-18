@@ -1,12 +1,21 @@
 package cn.l13z.middleware.db.router.config;
 
+import cn.l13z.middleware.db.router.DBRouterConfig;
+import cn.l13z.middleware.db.router.DBRouterJoinPoint;
+import cn.l13z.middleware.db.router.dynamic.DynamicDataSource;
+import cn.l13z.middleware.db.router.dynamic.DynamicMybatisPlugin;
 import cn.l13z.middleware.db.router.util.PropertyUtil;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import javax.sql.DataSource;
+import org.aopalliance.intercept.Interceptor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.EnvironmentAware;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 /**
  * ClassName: DataSourceAutoConfig.java <br>
@@ -42,7 +51,38 @@ public class DataSourceAutoConfig implements EnvironmentAware {
      */
     private String routerKey;
 
+    @Bean(name = "db-router-point")
+    @ConditionalOnMissingBean
+    public DBRouterJoinPoint point() {
+        return new DBRouterJoinPoint();
+    }
 
+    @Bean
+    public DBRouterConfig dbRouterConfig() {
+        return new DBRouterConfig(dbCount, tbCount, routerKey);
+    }
+
+    @Bean
+    public Interceptor plugin() {
+        return (Interceptor) new DynamicMybatisPlugin();
+    }
+
+    @Bean
+    public DataSource dataSource() {
+        // 创建数据源
+        Map<Object, Object> targetDataSources = new HashMap<>();
+        for (String dbInfo : dataSourceMap.keySet()) {
+            Map<String, Object> objMap = dataSourceMap.get(dbInfo);
+            targetDataSources.put(dbInfo, new DriverManagerDataSource(objMap.get("url").toString(), objMap.get("username").toString(), objMap.get("password").toString()));
+        }
+
+        // 设置数据源
+        DynamicDataSource dynamicDataSource = new DynamicDataSource();
+        dynamicDataSource.setTargetDataSources(targetDataSources);
+        dynamicDataSource.setDefaultTargetDataSource(new DriverManagerDataSource(defaultDataSourceConfig.get("url").toString(), defaultDataSourceConfig.get("username").toString(), defaultDataSourceConfig.get("password").toString()));
+
+        return dynamicDataSource;
+    }
     @Override
     public void setEnvironment(Environment environment) {
         String prefix = "mini-db-router.jdbc.datasource.";
@@ -63,9 +103,6 @@ public class DataSourceAutoConfig implements EnvironmentAware {
         // 默认数据源配置
         String defaultDataSource = environment.getProperty(prefix + "default");
         defaultDataSourceConfig =PropertyUtil.handle(environment, prefix + defaultDataSource, Map.class);
-
-
-
 
     }
 }
