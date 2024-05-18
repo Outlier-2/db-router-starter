@@ -4,18 +4,27 @@ import cn.l13z.middleware.db.router.DBRouterConfig;
 import cn.l13z.middleware.db.router.DBRouterJoinPoint;
 import cn.l13z.middleware.db.router.dynamic.DynamicDataSource;
 import cn.l13z.middleware.db.router.dynamic.DynamicMybatisPlugin;
+import cn.l13z.middleware.db.router.strategy.IDBRouterStrategy;
+import cn.l13z.middleware.db.router.strategy.impl.DBRouterStrategyHashCode;
 import cn.l13z.middleware.db.router.util.PropertyUtil;
+import cn.l13z.middleware.db.router.util.StringUtils;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import javax.sql.DataSource;
-import org.aopalliance.intercept.Interceptor;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.reflection.SystemMetaObject;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * ClassName: DataSourceAutoConfig.java <br>
@@ -30,22 +39,36 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 public class DataSourceAutoConfig implements EnvironmentAware {
 
     /**
-     * 数据库配置组
+     * 分库全局属性
      */
-    private final Map<String, Map<String, Object>> dataSourceMap = new HashMap<>();
+    private static final String TAG_GLOBAL = "global";
 
     /**
-     * 默认数据库配置
+     * 连接池属性
+     */
+    private static final String TAG_POOL = "pool";
+
+
+    /**
+     * 数据源配置组
+     */
+    private Map<String, Map<String, Object>> dataSourceMap = new HashMap<>();
+
+    /**
+     * 默认数据源配置
      */
     private Map<String, Object> defaultDataSourceConfig;
+
     /**
-     * 数据库数量
+     * 分库数量
      */
     private int dbCount;
+
     /**
-     * 表数量
+     * 分表数量
      */
     private int tbCount;
+
     /**
      * 路由字段
      */
@@ -53,8 +76,8 @@ public class DataSourceAutoConfig implements EnvironmentAware {
 
     @Bean(name = "db-router-point")
     @ConditionalOnMissingBean
-    public DBRouterJoinPoint point() {
-        return new DBRouterJoinPoint();
+    public DBRouterJoinPoint point(DBRouterConfig dbRouterConfig, IDBRouterStrategy dbRouterStrategy) {
+        return new DBRouterJoinPoint(dbRouterConfig, dbRouterStrategy);
     }
 
     @Bean
@@ -64,25 +87,75 @@ public class DataSourceAutoConfig implements EnvironmentAware {
 
     @Bean
     public Interceptor plugin() {
-        return (Interceptor) new DynamicMybatisPlugin();
+        return new DynamicMybatisPlugin();
+    }
+
+    // 可参考 README 配置连接池；https://gitcode.net/KnowledgePlanet/db-router-spring-boot-starter/-/blob/master/README.md
+    private DataSource createDataSource(Map<String, Object> attributes) {
+        try {
+            DataSourceProperties dataSourceProperties = new DataSourceProperties();
+            dataSourceProperties.setUrl(attributes.get("url").toString());
+            dataSourceProperties.setUsername(attributes.get("username").toString());
+            dataSourceProperties.setPassword(attributes.get("password").toString());
+
+            String driverClassName = attributes.get("driver-class-name") == null ? "com.zaxxer.hikari.HikariDataSource" : attributes.get("driver-class-name").toString();
+            dataSourceProperties.setDriverClassName(driverClassName);
+
+            String typeClassName = attributes.get("type-class-name") == null ? "com.zaxxer.hikari.HikariDataSource" : attributes.get("type-class-name").toString();
+            DataSource ds = dataSourceProperties.initializeDataSourceBuilder().type((Class<DataSource>) Class.forName(typeClassName)).build();
+
+            MetaObject dsMeta = SystemMetaObject.forObject(ds);
+            Map<String, Object> poolProps = (Map<String, Object>) (attributes.containsKey(TAG_POOL) ? attributes.get(TAG_POOL) : Collections.EMPTY_MAP);
+            for (Map.Entry<String, Object> entry : poolProps.entrySet()) {
+                // 中划线转驼峰
+                String key = StringUtils.middleScoreToCamelCase(entry.getKey());
+                if (dsMeta.hasSetter(key)) {
+                    dsMeta.setValue(key, entry.getValue());
+                }
+            }
+            return ds;
+        } catch (ClassNotFoundException e) {
+            throw new IllegalArgumentException("can not find datasource type class by class name", e);
+        }
     }
 
     @Bean
-    public DataSource dataSource() {
+    public DataSource createDataSource() {
         // 创建数据源
         Map<Object, Object> targetDataSources = new HashMap<>();
         for (String dbInfo : dataSourceMap.keySet()) {
             Map<String, Object> objMap = dataSourceMap.get(dbInfo);
-            targetDataSources.put(dbInfo, new DriverManagerDataSource(objMap.get("url").toString(), objMap.get("username").toString(), objMap.get("password").toString()));
+            // 根据objMap创建DataSourceProperties,遍历objMap根据属性反射创建DataSourceProperties
+            DataSource ds = createDataSource(objMap);
+            targetDataSources.put(dbInfo, ds);
+
         }
 
         // 设置数据源
         DynamicDataSource dynamicDataSource = new DynamicDataSource();
         dynamicDataSource.setTargetDataSources(targetDataSources);
-        dynamicDataSource.setDefaultTargetDataSource(new DriverManagerDataSource(defaultDataSourceConfig.get("url").toString(), defaultDataSourceConfig.get("username").toString(), defaultDataSourceConfig.get("password").toString()));
+        // db0为默认数据源
+        dynamicDataSource.setDefaultTargetDataSource(createDataSource(defaultDataSourceConfig));
 
         return dynamicDataSource;
     }
+
+    @Bean
+    public IDBRouterStrategy dbRouterStrategy(DBRouterConfig dbRouterConfig) {
+        return new DBRouterStrategyHashCode(dbRouterConfig);
+    }
+
+    @Bean
+    public TransactionTemplate transactionTemplate(DataSource dataSource) {
+        DataSourceTransactionManager dataSourceTransactionManager = new DataSourceTransactionManager();
+        dataSourceTransactionManager.setDataSource(dataSource);
+
+        TransactionTemplate transactionTemplate = new TransactionTemplate();
+        transactionTemplate.setTransactionManager(dataSourceTransactionManager);
+        transactionTemplate.setPropagationBehaviorName("PROPAGATION_REQUIRED");
+        return transactionTemplate;
+    }
+
     @Override
     public void setEnvironment(Environment environment) {
         String prefix = "mini-db-router.jdbc.datasource.";
@@ -90,19 +163,38 @@ public class DataSourceAutoConfig implements EnvironmentAware {
         dbCount = Integer.parseInt(Objects.requireNonNull(environment.getProperty(prefix + "dbCount")));
         tbCount = Integer.parseInt(Objects.requireNonNull(environment.getProperty(prefix + "tbCount")));
         routerKey = environment.getProperty(prefix + "routerKey");
-
-        // 分库分表数据源配置
-        String  dataSource = environment.getProperty(prefix + "list");
-        // TODO 暂时使用一个简单的判断是否数据源为空，后续需要完善
-        assert dataSource != null;
-        for (String dbInfo : dataSource.split(",")){
-            Map<String, Object> dataSourceProps = PropertyUtil.handle(environment, prefix + dbInfo, Map.class);
-            dataSourceMap.putIfAbsent(dbInfo, dataSourceProps);
+        // 分库分表数据源
+        String dataSources = environment.getProperty(prefix + "list");
+        Map<String, Object> globalInfo = getGlobalProps(environment, prefix + TAG_GLOBAL);
+        for (String dbInfo : dataSources.split(",")) {
+            final String dbPrefix = prefix + dbInfo;
+            Map<String, Object> dataSourceProps = PropertyUtil.handle(environment, dbPrefix, Map.class);
+            injectGlobal(dataSourceProps, globalInfo);
+            dataSourceMap.put(dbInfo, dataSourceProps);
         }
 
-        // 默认数据源配置
-        String defaultDataSource = environment.getProperty(prefix + "default");
-        defaultDataSourceConfig =PropertyUtil.handle(environment, prefix + defaultDataSource, Map.class);
-
+        // 默认数据源
+        String defaultData = environment.getProperty(prefix + "default");
+        defaultDataSourceConfig = PropertyUtil.handle(environment, prefix + defaultData, Map.class);
+        injectGlobal(defaultDataSourceConfig, globalInfo);
     }
+
+    private Map<String, Object> getGlobalProps(Environment environment, String key) {
+        try {
+            return PropertyUtil.handle(environment, key, Map.class);
+        } catch (Exception e) {
+            return Collections.EMPTY_MAP;
+        }
+    }
+
+    private void injectGlobal(Map<String, Object> origin, Map<String, Object> global) {
+        for (String key : global.keySet()) {
+            if (!origin.containsKey(key)) {
+                origin.put(key, global.get(key));
+            } else if (origin.get(key) instanceof Map) {
+                injectGlobal((Map<String, Object>) origin.get(key), (Map<String, Object>) global.get(key));
+            }
+        }
+    }
+
 }

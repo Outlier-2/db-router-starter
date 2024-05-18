@@ -20,6 +20,11 @@ public class DBRouterStrategyHashCode implements IDBRouterStrategy {
     private final Logger logger = LoggerFactory.getLogger(DBRouterStrategyHashCode.class);
 
     private DBRouterConfig dbRouterConfig;
+
+    public DBRouterStrategyHashCode(DBRouterConfig dbRouterConfig) {
+        this.dbRouterConfig = dbRouterConfig;
+        logger.info("路由策略：哈希算法");
+    }
     @Override
     public void doRouter(String dbKeyAttr) {
         int size = dbRouterConfig.getDbCount() * dbRouterConfig.getTbCount();
