@@ -10,6 +10,7 @@ package cn.l13z.middleware.db.router;
  * Modification History: <br> - 2024/5/18 AlfredOrlando 数据源的上下文 <br>
  */
 public class DBContextHolder {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(DBContextHolder.class);
 
     private static final ThreadLocal<String> DB_KEY = new ThreadLocal<>();
     private static final ThreadLocal<String> TB_KEY = new ThreadLocal<>();

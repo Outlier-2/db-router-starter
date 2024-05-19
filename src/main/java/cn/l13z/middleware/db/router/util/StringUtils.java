@@ -10,6 +10,8 @@ package cn.l13z.middleware.db.router.util;
  * Modification History: <br> - 2024/5/18 AlfredOrlando 字符串工具类 <br>
  */
 public class StringUtils {
+
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(StringUtils.class);
     public static String middleScoreToCamelCase(String input) {
         StringBuilder result = new StringBuilder();
         boolean nextUpperCase = false;
@@ -27,6 +29,7 @@ public class StringUtils {
                 }
             }
         }
+        logger.info("middleScoreToCamelCase: " + result.toString());
         return result.toString();
     }
 }

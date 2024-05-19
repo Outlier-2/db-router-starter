@@ -1,18 +1,13 @@
 package cn.l13z.middleware.db.router;
 
 import cn.l13z.middleware.db.router.annotation.DBRouter;
-import cn.l13z.middleware.db.router.annotation.DBRouterStrategy;
 import cn.l13z.middleware.db.router.strategy.IDBRouterStrategy;
-import java.lang.reflect.Method;
 import org.apache.commons.beanutils.BeanUtils;
 import org.apache.commons.lang.StringUtils;
-import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.ProceedingJoinPoint;
-import org.aspectj.lang.Signature;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
-import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,11 +48,13 @@ public class DBRouterJoinPoint {
         }
 
         dbKey = StringUtils.isNotBlank(dbKey) ? dbKey : dbRouterConfig.getRouterKey();
-
+        logger.info("路由属性初次获取：{}", dbKey);
         // 路由属性
         String dbKeyAttr = getAttrValue(dbKey, jp.getArgs());
         //路由策略
         dbRouterStrategy.doRouter(dbKeyAttr);
+
+        logger.info("路由属性：{}，路由策略：{}", dbKeyAttr, dbRouterStrategy.getClass().getSimpleName());
         //返回结果
         // 返回结果
         try {
@@ -65,12 +62,6 @@ public class DBRouterJoinPoint {
         } finally {
             dbRouterStrategy.clear();
         }
-    }
-
-    private Method getMethod(JoinPoint jp) throws NoSuchMethodException {
-        Signature sig = jp.getSignature();
-        MethodSignature methodSignature = (MethodSignature) sig;
-        return jp.getTarget().getClass().getMethod(methodSignature.getName(), methodSignature.getParameterTypes());
     }
 
     public String getAttrValue(String attr, Object[] args) {

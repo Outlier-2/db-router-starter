@@ -16,6 +16,8 @@ import org.apache.ibatis.plugin.Signature;
 import org.apache.ibatis.reflection.DefaultReflectorFactory;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * ClassName: DynamicMybatisPlugin.java <br>
@@ -27,8 +29,9 @@ import org.apache.ibatis.reflection.SystemMetaObject;
  * Modification History: <br> - 2024/5/18 AlfredOrlando 动态MybatisPlugin 拦截器 <br>
  */
 @Intercepts({@Signature(type = StatementHandler.class, method = "prepare", args = {Connection.class, Integer.class})})
-public class DynamicMybatisPlugin implements Interceptor {
+public class  DynamicMybatisPlugin implements Interceptor {
 
+    private static final Logger log = LoggerFactory.getLogger(DynamicMybatisPlugin.class);
     private final Pattern pattern = Pattern.compile("(from|into|update)[\\s]{1,}(\\w{1,})", Pattern.CASE_INSENSITIVE);
 
     @Override
@@ -37,7 +40,6 @@ public class DynamicMybatisPlugin implements Interceptor {
         StatementHandler statementHandler = (StatementHandler) invocation.getTarget();
         MetaObject metaObject = MetaObject.forObject(statementHandler, SystemMetaObject.DEFAULT_OBJECT_FACTORY, SystemMetaObject.DEFAULT_OBJECT_WRAPPER_FACTORY, new DefaultReflectorFactory());
         MappedStatement mappedStatement = (MappedStatement) metaObject.getValue("delegate.mappedStatement");
-
         // 获取自定义注解判断是否进行分表操作
         String id = mappedStatement.getId();
         String className = id.substring(0, id.lastIndexOf("."));
@@ -50,6 +52,7 @@ public class DynamicMybatisPlugin implements Interceptor {
         // 获取SQL
         BoundSql boundSql = statementHandler.getBoundSql();
         String sql = boundSql.getSql();
+
 
         // 替换SQL表名 USER 为 USER_03
         Matcher matcher = pattern.matcher(sql);
